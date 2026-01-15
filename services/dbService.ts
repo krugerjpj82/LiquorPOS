@@ -3,13 +3,7 @@ import { AppState, Product, Sale } from '../types';
 
 const STORAGE_KEY = 'omnipos_pro_data';
 
-const DEFAULT_PRODUCTS: Product[] = [
-  { id: '1', name: 'Fresh Organic Coffee', category: 'Beverage', price: 12.5, stock: 45, sku: 'COF-001', image: 'https://picsum.photos/seed/coffee/200/200' },
-  { id: '2', name: 'Artisan Sourdough', category: 'Bakery', price: 6.0, stock: 12, sku: 'BAK-001', image: 'https://picsum.photos/seed/bread/200/200' },
-  { id: '3', name: 'Whole Milk 1L', category: 'Dairy', price: 3.2, stock: 25, sku: 'DAI-001', image: 'https://picsum.photos/seed/milk/200/200' },
-  { id: '4', name: 'Green Tea Box', category: 'Beverage', price: 8.5, stock: 15, sku: 'COF-002', image: 'https://picsum.photos/seed/tea/200/200' },
-  { id: '5', name: 'Honey Glazed Ham', category: 'Deli', price: 18.0, stock: 8, sku: 'DEL-001', image: 'https://picsum.photos/seed/ham/200/200' },
-];
+const DEFAULT_PRODUCTS: Product[] = [];
 
 export const dbService = {
   loadData: (): AppState => {

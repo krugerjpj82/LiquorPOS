@@ -43,6 +43,7 @@ const App: React.FC = () => {
   const [manualFloat, setManualFloat] = useState(0);
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Persistence
   useEffect(() => {
@@ -105,6 +106,58 @@ const App: React.FC = () => {
 
   const removeFromCart = (productId: string) => {
     setCart(prev => prev.filter(item => item.productId !== productId));
+  };
+
+  const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = new Uint8Array(event.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
+
+        const newProducts: Product[] = jsonData.map((row, index) => ({
+          id: row.id || `UPLOAD-${Date.now()}-${index}`,
+          name: row.name || row.Product || 'Unknown Product',
+          category: row.category || row.Category || 'General',
+          price: parseFloat(row.price || row.Price) || 0,
+          stock: parseInt(row.stock || row.Stock) || 0,
+          sku: String(row.sku || row.SKU || `SKU-${Date.now()}-${index}`),
+        }));
+
+        if (newProducts.length === 0) {
+          alert("No valid product data found in the Excel file.");
+          return;
+        }
+
+        // Simple merge: if SKU exists, update. If not, add.
+        setState(prev => {
+          const existingProducts = [...prev.products];
+          newProducts.forEach(newP => {
+            const idx = existingProducts.findIndex(p => p.sku === newP.sku);
+            if (idx > -1) {
+              existingProducts[idx] = { ...existingProducts[idx], ...newP };
+            } else {
+              existingProducts.push(newP);
+            }
+          });
+          return { ...prev, products: existingProducts };
+        });
+
+        alert(`Successfully imported/updated ${newProducts.length} products.`);
+      } catch (err) {
+        console.error(err);
+        alert("Error parsing Excel file. Please ensure it follows the correct format (SKU, Name, Price, Stock, Category).");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    // Reset input
+    e.target.value = '';
   };
 
   // Hardware Actions
@@ -359,14 +412,29 @@ const App: React.FC = () => {
 
   const renderInventory = () => (
     <div className="bg-[#2B2930] rounded-[40px] border border-[#49454F] overflow-hidden shadow-2xl">
-      <div className="p-10 flex justify-between items-center border-b border-[#49454F]">
+      <div className="p-10 flex flex-col md:flex-row justify-between items-start md:items-center border-b border-[#49454F] gap-6">
         <div>
           <h3 className="text-3xl font-medium tracking-tight">Item Registry</h3>
           <p className="text-[#938F99] text-sm mt-1">Manage stock levels and unit pricing</p>
         </div>
-        <button className="bg-[#D0BCFF] text-[#381E72] px-8 py-4 rounded-full font-bold flex items-center gap-2">
-          <span className="material-symbols-outlined">add</span> New Product
-        </button>
+        <div className="flex flex-wrap gap-4">
+          <input
+            type="file"
+            ref={fileInputRef}
+            className="hidden"
+            accept=".xlsx, .xls"
+            onChange={handleExcelUpload}
+          />
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            className="bg-[#49454F] text-[#EADDFF] px-8 py-4 rounded-full font-bold flex items-center gap-2 hover:bg-[#49454F]/80 transition-all border border-[#EADDFF]/20"
+          >
+            <span className="material-symbols-outlined">upload_file</span> Upload Excel
+          </button>
+          <button className="bg-[#D0BCFF] text-[#381E72] px-8 py-4 rounded-full font-bold flex items-center gap-2 hover:bg-[#EADDFF] transition-all">
+            <span className="material-symbols-outlined">add</span> New Product
+          </button>
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left">
