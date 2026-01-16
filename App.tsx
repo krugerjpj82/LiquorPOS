@@ -27,6 +27,7 @@ const App: React.FC = () => {
   const [aiInsights, setAiInsights] = useState<any>(null);
   const [loadingAi, setLoadingAi] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
   
   // Superuser Auth State
   const [isSuperuserAuthenticated, setIsSuperuserAuthenticated] = useState(false);
@@ -121,27 +122,49 @@ const App: React.FC = () => {
         const worksheet = workbook.Sheets[firstSheetName];
         const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
 
-        const newProducts: Product[] = jsonData.map((row, index) => ({
-          id: row.id || `UPLOAD-${Date.now()}-${index}`,
-          name: row.name || row.Product || 'Unknown Product',
-          category: row.category || row.Category || 'General',
-          price: parseFloat(row.price || row.Price) || 0,
-          stock: parseInt(row.stock || row.Stock) || 0,
-          sku: String(row.sku || row.SKU || `SKU-${Date.now()}-${index}`),
-        }));
-
-        if (newProducts.length === 0) {
-          alert("No valid product data found in the Excel file.");
+        if (jsonData.length === 0) {
+          alert("Excel file is empty.");
           return;
         }
 
-        // Simple merge: if SKU exists, update. If not, add.
+        const findValue = (row: any, synonyms: string[]) => {
+          const keys = Object.keys(row);
+          for (const s of synonyms) {
+            const match = keys.find(k => k.toLowerCase().trim() === s.toLowerCase());
+            if (match) return row[match];
+          }
+          return undefined;
+        };
+
+        const newProducts: Product[] = jsonData.map((row, index) => {
+          const sku = String(findValue(row, ['sku', 'barcode', 'code', 'id']) || `SKU-${Date.now()}-${index}`);
+          const name = String(findValue(row, ['name', 'product', 'item', 'description', 'product name']) || 'Unnamed Product');
+          const price = parseFloat(findValue(row, ['price', 'cost', 'unit price', 'value'])) || 0;
+          const stock = parseInt(findValue(row, ['stock', 'quantity', 'qty', 'amount', 'on hand'])) || 0;
+          const category = String(findValue(row, ['category', 'type', 'dept', 'department']) || 'General');
+
+          return {
+            id: `PROD-${sku}-${Date.now()}`,
+            name,
+            category,
+            price,
+            stock,
+            sku,
+          };
+        });
+
         setState(prev => {
           const existingProducts = [...prev.products];
           newProducts.forEach(newP => {
             const idx = existingProducts.findIndex(p => p.sku === newP.sku);
             if (idx > -1) {
-              existingProducts[idx] = { ...existingProducts[idx], ...newP };
+              existingProducts[idx] = { 
+                ...existingProducts[idx], 
+                name: newP.name, 
+                price: newP.price, 
+                stock: newP.stock,
+                category: newP.category 
+              };
             } else {
               existingProducts.push(newP);
             }
@@ -149,14 +172,13 @@ const App: React.FC = () => {
           return { ...prev, products: existingProducts };
         });
 
-        alert(`Successfully imported/updated ${newProducts.length} products.`);
+        alert(`Success: Imported/Updated ${newProducts.length} items from Excel.`);
       } catch (err) {
-        console.error(err);
-        alert("Error parsing Excel file. Please ensure it follows the correct format (SKU, Name, Price, Stock, Category).");
+        console.error("Excel Import Error:", err);
+        alert("Failed to process Excel. Please check column headers (SKU, Name, Price, Stock).");
       }
     };
     reader.readAsArrayBuffer(file);
-    // Reset input
     e.target.value = '';
   };
 
@@ -168,10 +190,39 @@ const App: React.FC = () => {
   };
 
   const printReceipt = (sale: Sale) => {
-    console.log("%c [HARDWARE] Command: Printing Slip for " + sale.id, "color: #D0BCFF;");
+    const { config } = state;
+    console.log("%c [HARDWARE] Printing Till Slip", "color: #D0BCFF; font-weight: bold;");
+    console.log(`--------------------------------`);
+    if (config.printLogo) console.log(`      *** ${config.storeName} ***`);
+    console.log(`      ${config.storeAddress}`);
+    console.log(`      TEL: ${config.tel}`);
+    if (config.printVat) console.log(`      VAT: ${config.vatNumber}`);
+    console.log(`--------------------------------`);
+    console.log(`DATE: ${new Date(sale.timestamp).toLocaleString()}`);
+    console.log(`SALE ID: ${sale.id}`);
+    console.log(`--------------------------------`);
+    sale.items.forEach(item => {
+      console.log(`${item.name.padEnd(20)} x${item.quantity}  R${(item.price * item.quantity).toFixed(2)}`);
+    });
+    console.log(`--------------------------------`);
+    console.log(`TOTAL:             R${sale.total.toFixed(2)}`);
+    console.log(`--------------------------------`);
+    console.log(`      ${config.receiptFooter}`);
+    console.log(`--------------------------------`);
+    console.log("%c [HARDWARE] Print Finished", "color: #D0BCFF; font-weight: bold;");
   };
 
-  const processSale = () => {
+  const handlePrintReceipt = () => {
+    if (state.sales.length === 0) {
+      alert("No transactions found to print.");
+      return;
+    }
+    const lastSale = state.sales[state.sales.length - 1];
+    printReceipt(lastSale);
+    alert(`Printing Receipt for Transaction: ${lastSale.id}`);
+  };
+
+  const processSale = (paymentMethod: 'cash' | 'card') => {
     if (cart.length === 0) return;
     const total = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
     const newSale: Sale = {
@@ -179,7 +230,7 @@ const App: React.FC = () => {
       timestamp: Date.now(),
       items: [...cart],
       total,
-      paymentMethod: 'card'
+      paymentMethod
     };
     
     const newProducts = state.products.map(p => {
@@ -190,11 +241,11 @@ const App: React.FC = () => {
     
     setState(prev => ({ ...prev, sales: [...prev.sales, newSale], products: newProducts }));
     setCart([]);
+    setShowPaymentModal(false);
     
     // Auto-sync hardware
-    printReceipt(newSale);
     openTillDrawer();
-    alert("Payment Successful. Printing Receipt and Opening Drawer.");
+    alert(`Payment Successful via ${paymentMethod.toUpperCase()}. Transaction finalized and Drawer opened. Select 'Print Receipt' to generate till slip.`);
   };
 
   // Derived Data
@@ -248,7 +299,6 @@ const App: React.FC = () => {
           </div>
 
           <div className="w-full space-y-6">
-            {/* SEARCH BOX ABOVE BARCODE ENTRY */}
             <div className="w-full relative">
               <label className="block text-[10px] font-bold text-[#D0BCFF] text-left ml-2 mb-2 uppercase tracking-widest">Search Inventory</label>
               <div className="relative group">
@@ -262,7 +312,6 @@ const App: React.FC = () => {
                 />
               </div>
               
-              {/* Search Results Dropdown */}
               {filteredProducts.length > 0 && (
                 <div className="absolute top-full left-0 right-0 mt-2 bg-[#1C1B1F] border border-[#49454F] rounded-2xl overflow-hidden shadow-2xl z-50">
                   {filteredProducts.map(p => (
@@ -318,6 +367,14 @@ const App: React.FC = () => {
                 </form>
               </div>
             </div>
+
+            <button 
+              onClick={handlePrintReceipt}
+              className="w-full flex items-center justify-center gap-3 py-4 text-[#D0BCFF] hover:bg-[#D0BCFF]/10 rounded-2xl border border-dashed border-[#D0BCFF]/30 transition-all font-bold uppercase tracking-widest text-sm"
+            >
+              <span className="material-symbols-outlined">print</span>
+              Print Receipt
+            </button>
           </div>
         </div>
       </div>
@@ -368,15 +425,62 @@ const App: React.FC = () => {
           </div>
 
           <button
-            onClick={processSale}
+            onClick={() => setShowPaymentModal(true)}
             disabled={cart.length === 0}
             className="w-full bg-[#D0BCFF] text-[#381E72] py-7 rounded-full font-bold text-2xl transition-all shadow-lg hover:shadow-[#D0BCFF]/20 active:scale-[0.98] disabled:bg-[#49454F] disabled:text-[#938F99] flex items-center justify-center gap-4"
           >
-            <span className="material-symbols-outlined text-3xl">print</span>
-            Finalize & Pay
+            <span className="material-symbols-outlined text-3xl">check_circle</span>
+            Finalize Transaction
           </button>
         </div>
       </div>
+
+      {/* Payment Selection Modal */}
+      {showPaymentModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="bg-[#2B2930] w-full max-w-md rounded-[48px] border border-[#49454F] p-12 shadow-2xl animate-in zoom-in-95 duration-300 space-y-10">
+            <div className="text-center space-y-3">
+              <h3 className="text-3xl font-medium tracking-tight">Select Payment Mode</h3>
+              <p className="text-[#938F99] font-medium">How would the customer like to pay?</p>
+            </div>
+            
+            <div className="flex flex-col gap-6">
+              <button 
+                onClick={() => processSale('cash')}
+                className="group flex items-center gap-8 bg-[#1C1B1F] hover:bg-[#D0BCFF]/10 border-2 border-[#49454F] hover:border-[#D0BCFF] p-8 rounded-[32px] transition-all"
+              >
+                <div className="bg-[#D0BCFF]/20 group-hover:bg-[#D0BCFF] p-5 rounded-2xl transition-colors">
+                  <span className="material-symbols-outlined text-4xl text-[#D0BCFF] group-hover:text-[#381E72]">payments</span>
+                </div>
+                <div className="text-left">
+                  <span className="block text-2xl font-bold tracking-tight">Cash Payment</span>
+                  <span className="text-sm text-[#938F99] font-medium">Standard drawer transaction</span>
+                </div>
+              </button>
+
+              <button 
+                onClick={() => processSale('card')}
+                className="group flex items-center gap-8 bg-[#1C1B1F] hover:bg-[#D0BCFF]/10 border-2 border-[#49454F] hover:border-[#D0BCFF] p-8 rounded-[32px] transition-all"
+              >
+                <div className="bg-[#D0BCFF]/20 group-hover:bg-[#D0BCFF] p-5 rounded-2xl transition-colors">
+                  <span className="material-symbols-outlined text-4xl text-[#D0BCFF] group-hover:text-[#381E72]">credit_card</span>
+                </div>
+                <div className="text-left">
+                  <span className="block text-2xl font-bold tracking-tight">Card Payment</span>
+                  <span className="text-sm text-[#938F99] font-medium">Digital electronic processing</span>
+                </div>
+              </button>
+            </div>
+
+            <button 
+              onClick={() => setShowPaymentModal(false)}
+              className="w-full py-4 text-[#938F99] hover:text-[#E6E1E5] font-bold uppercase tracking-widest text-xs transition-colors"
+            >
+              Cancel Transaction
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -416,13 +520,16 @@ const App: React.FC = () => {
         <div>
           <h3 className="text-3xl font-medium tracking-tight">Item Registry</h3>
           <p className="text-[#938F99] text-sm mt-1">Manage stock levels and unit pricing</p>
+          <p className="text-[#D0BCFF] text-[10px] uppercase font-bold tracking-widest mt-2 opacity-70">
+            Excel Headers: SKU, Name, Price, Stock
+          </p>
         </div>
         <div className="flex flex-wrap gap-4">
           <input
             type="file"
             ref={fileInputRef}
             className="hidden"
-            accept=".xlsx, .xls"
+            accept=".xlsx, .xls, .csv"
             onChange={handleExcelUpload}
           />
           <button 
@@ -448,24 +555,152 @@ const App: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-[#49454F]">
-            {state.products.map(p => (
-              <tr key={p.id} className="hover:bg-[#49454F]/20">
-                <td className="px-10 py-6 font-bold text-lg">{p.name}</td>
-                <td className="px-10 py-6 text-[#938F99] font-mono">{p.sku}</td>
-                <td className="px-10 py-6 font-bold text-[#D0BCFF]">R{p.price.toFixed(2)}</td>
-                <td className="px-10 py-6">
-                  <span className={`font-bold px-4 py-1 rounded-full text-sm ${p.stock < 10 ? 'bg-red-500/20 text-red-400' : 'bg-[#D0BCFF]/10 text-[#D0BCFF]'}`}>
-                    {p.stock} units
-                  </span>
-                </td>
-                <td className="px-10 py-6 text-right">
-                  <button className="text-[#938F99] hover:text-[#D0BCFF] mx-2"><span className="material-symbols-outlined">edit</span></button>
-                  <button className="text-[#938F99] hover:text-[#F2B8B5] mx-2"><span className="material-symbols-outlined">delete</span></button>
+            {state.products.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-10 py-20 text-center text-[#938F99]">
+                  <span className="material-symbols-outlined text-6xl mb-4 block">inventory_2</span>
+                  <p className="text-lg font-medium">No products in registry.</p>
+                  <p className="text-sm">Upload an Excel file or add manually to get started.</p>
                 </td>
               </tr>
-            ))}
+            ) : (
+              state.products.map(p => (
+                <tr key={p.id} className="hover:bg-[#49454F]/20 transition-colors">
+                  <td className="px-10 py-6">
+                    <p className="font-bold text-lg text-[#E6E1E5]">{p.name}</p>
+                    <p className="text-xs text-[#938F99] font-medium uppercase tracking-widest">{p.category}</p>
+                  </td>
+                  <td className="px-10 py-6 text-[#938F99] font-mono">{p.sku}</td>
+                  <td className="px-10 py-6 font-bold text-[#D0BCFF]">R{p.price.toFixed(2)}</td>
+                  <td className="px-10 py-6">
+                    <span className={`font-bold px-4 py-1 rounded-full text-sm ${p.stock < 10 ? 'bg-red-500/20 text-red-400' : 'bg-[#D0BCFF]/10 text-[#D0BCFF]'}`}>
+                      {p.stock} units
+                    </span>
+                  </td>
+                  <td className="px-10 py-6 text-right">
+                    <button className="text-[#938F99] hover:text-[#D0BCFF] mx-2"><span className="material-symbols-outlined">edit</span></button>
+                    <button className="text-[#938F99] hover:text-[#F2B8B5] mx-2" onClick={() => {
+                      if(confirm(`Delete ${p.name}?`)) {
+                        setState(prev => ({ ...prev, products: prev.products.filter(item => item.id !== p.id) }));
+                      }
+                    }}><span className="material-symbols-outlined">delete</span></button>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+
+  const renderPrintSettings = () => (
+    <div className="max-w-6xl mx-auto space-y-10 animate-in fade-in">
+      <header className="flex justify-between items-center bg-[#2B2930] p-8 rounded-[32px] border border-[#49454F] shadow-lg">
+        <div>
+          <h2 className="text-4xl font-medium tracking-tight">Print Layout Configuration</h2>
+          <p className="text-[#938F99] mt-2 font-bold uppercase text-[10px] tracking-widest">Business Detail & Tillslip Setup</p>
+        </div>
+        <button onClick={() => setCurrentView(View.SUPERUSER)} className="bg-[#49454F] text-[#E6E1E5] px-8 py-4 rounded-full font-bold hover:bg-[#49454F]/80 transition-all flex items-center gap-2">
+          <span className="material-symbols-outlined">arrow_back</span> Back
+        </button>
+      </header>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="bg-[#2B2930] p-10 rounded-[40px] border border-[#49454F] space-y-8 shadow-xl">
+          <h3 className="text-2xl font-medium border-b border-[#49454F] pb-4">Business Identity</h3>
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-[#D0BCFF] uppercase tracking-widest ml-1">Store Name</label>
+              <input type="text" className="w-full bg-[#1C1B1F] border border-[#49454F] rounded-xl px-4 py-3 text-[#E6E1E5] focus:border-[#D0BCFF] outline-none transition-all" 
+                value={state.config.storeName} 
+                onChange={e => setState({...state, config: {...state.config, storeName: e.target.value}})} />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-[#D0BCFF] uppercase tracking-widest ml-1">Business Address</label>
+              <textarea rows={2} className="w-full bg-[#1C1B1F] border border-[#49454F] rounded-xl px-4 py-3 text-[#E6E1E5] focus:border-[#D0BCFF] outline-none transition-all" 
+                value={state.config.storeAddress} 
+                onChange={e => setState({...state, config: {...state.config, storeAddress: e.target.value}})} />
+            </div>
+            <div className="grid grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-[#D0BCFF] uppercase tracking-widest ml-1">Telephone</label>
+                <input type="text" className="w-full bg-[#1C1B1F] border border-[#49454F] rounded-xl px-4 py-3 text-[#E6E1E5] focus:border-[#D0BCFF] outline-none transition-all" 
+                  value={state.config.tel} 
+                  onChange={e => setState({...state, config: {...state.config, tel: e.target.value}})} />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-[#D0BCFF] uppercase tracking-widest ml-1">VAT Number</label>
+                <input type="text" className="w-full bg-[#1C1B1F] border border-[#49454F] rounded-xl px-4 py-3 text-[#E6E1E5] focus:border-[#D0BCFF] outline-none transition-all" 
+                  value={state.config.vatNumber} 
+                  onChange={e => setState({...state, config: {...state.config, vatNumber: e.target.value}})} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-[#D0BCFF] uppercase tracking-widest ml-1">Receipt Footer Message</label>
+              <input type="text" className="w-full bg-[#1C1B1F] border border-[#49454F] rounded-xl px-4 py-3 text-[#E6E1E5] focus:border-[#D0BCFF] outline-none transition-all" 
+                value={state.config.receiptFooter} 
+                onChange={e => setState({...state, config: {...state.config, receiptFooter: e.target.value}})} />
+            </div>
+          </div>
+
+          <h3 className="text-2xl font-medium border-b border-[#49454F] pb-4 pt-4">Visual Toggles</h3>
+          <div className="grid grid-cols-2 gap-6">
+            <button 
+              onClick={() => setState({...state, config: {...state.config, printLogo: !state.config.printLogo}})}
+              className={`p-6 rounded-3xl border-2 transition-all flex flex-col items-center gap-3 ${state.config.printLogo ? 'bg-[#D0BCFF]/10 border-[#D0BCFF] text-[#D0BCFF]' : 'bg-transparent border-[#49454F] text-[#938F99]'}`}
+            >
+              <span className="material-symbols-outlined text-4xl">branding_watermark</span>
+              <span className="font-bold uppercase text-xs">Print Header Logo</span>
+            </button>
+            <button 
+              onClick={() => setState({...state, config: {...state.config, printVat: !state.config.printVat}})}
+              className={`p-6 rounded-3xl border-2 transition-all flex flex-col items-center gap-3 ${state.config.printVat ? 'bg-[#D0BCFF]/10 border-[#D0BCFF] text-[#D0BCFF]' : 'bg-transparent border-[#49454F] text-[#938F99]'}`}
+            >
+              <span className="material-symbols-outlined text-4xl">receipt</span>
+              <span className="font-bold uppercase text-xs">Show VAT Details</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="flex flex-col items-center">
+          <div className="w-[400px] bg-white text-black p-8 shadow-2xl font-mono text-sm space-y-4">
+             <div className="text-center space-y-1">
+                {state.config.printLogo && <div className="font-bold text-lg">*** {state.config.storeName} ***</div>}
+                <div>{state.config.storeAddress}</div>
+                <div>TEL: {state.config.tel}</div>
+                {state.config.printVat && <div>VAT: {state.config.vatNumber}</div>}
+             </div>
+             <div className="border-t border-black pt-4">
+                <div className="flex justify-between">
+                  <span>DATE: {new Date().toLocaleDateString()}</span>
+                  <span>TIME: {new Date().toLocaleTimeString()}</span>
+                </div>
+                <div>SALE ID: SALE-SAMPLE-001</div>
+             </div>
+             <div className="border-t border-black pt-4 space-y-1">
+                <div className="flex justify-between">
+                  <span>SAMPLE ITEM A x2</span>
+                  <span>R200.00</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>SAMPLE ITEM B x1</span>
+                  <span>R150.00</span>
+                </div>
+             </div>
+             <div className="border-t border-black pt-4 flex justify-between font-bold text-lg">
+                <span>TOTAL:</span>
+                <span>R350.00</span>
+             </div>
+             <div className="border-t border-black pt-8 text-center uppercase tracking-tighter">
+                {state.config.receiptFooter}
+             </div>
+             <div className="text-center pt-2 italic text-[10px]">
+                Powered by LiquorPOS Pro
+             </div>
+          </div>
+          <p className="mt-4 text-[#938F99] italic text-sm">Real-time Mock Preview</p>
+        </div>
       </div>
     </div>
   );
@@ -516,7 +751,6 @@ const App: React.FC = () => {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 space-y-8">
-              {/* NOTES COUNTER */}
               <div className="bg-[#2B2930] rounded-[32px] p-8 border border-[#49454F] shadow-xl">
                 <h3 className="text-xl font-medium mb-8 flex items-center gap-3"><span className="material-symbols-outlined text-[#D0BCFF]">payments</span> Notes Registry</h3>
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
@@ -531,7 +765,6 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              {/* COIN COUNTER */}
               <div className="bg-[#2B2930] rounded-[32px] p-8 border border-[#49454F] shadow-xl">
                 <h3 className="text-xl font-medium mb-8 flex items-center gap-3"><span className="material-symbols-outlined text-[#D0BCFF]">toll</span> Coins Registry</h3>
                 <div className="grid grid-cols-2 md:grid-cols-6 gap-6">
@@ -594,11 +827,12 @@ const App: React.FC = () => {
           </button>
         </header>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
           <AdminCard onClick={() => setCurrentView(View.DASHBOARD)} title="Analytics" desc="Live sales performance" icon="monitoring" color="bg-[#D0BCFF]" />
           <AdminCard onClick={() => setCurrentView(View.INVENTORY)} title="Inventory" desc="Pricing & Stock Vault" icon="inventory_2" color="bg-[#EADDFF]" />
           <AdminCard onClick={() => setIsCashupMode(true)} title="Cashup" desc="End of day reconciliation" icon="account_balance_wallet" color="bg-[#D0BCFF]" />
-          <AdminCard onClick={() => setCurrentView(View.BACKUP)} title="Persistence" desc="Cloud & Local Backups" icon="cloud_sync" color="bg-[#EADDFF]" />
+          <AdminCard onClick={() => setCurrentView(View.PRINT_SETTINGS)} title="Printing" desc="Configure tillslip layout" icon="print" color="bg-[#EADDFF]" />
+          <AdminCard onClick={() => setCurrentView(View.BACKUP)} title="Persistence" desc="Cloud & Local Backups" icon="cloud_sync" color="bg-[#D0BCFF]" />
         </div>
       </div>
     );
@@ -623,6 +857,7 @@ const App: React.FC = () => {
               {currentView === View.DASHBOARD && 'Store Metrics'}
               {currentView === View.INVENTORY && 'Stock Inventory'}
               {currentView === View.BACKUP && 'System Persistence'}
+              {currentView === View.PRINT_SETTINGS && 'Printing Setup'}
             </h1>
             <p className="text-[#938F99] text-[10px] font-black uppercase tracking-[0.4em]">{new Date().toDateString()}</p>
           </div>
@@ -642,6 +877,7 @@ const App: React.FC = () => {
           {currentView === View.SUPERUSER && renderSuperuser()}
           {currentView === View.DASHBOARD && renderDashboard()}
           {currentView === View.INVENTORY && renderInventory()}
+          {currentView === View.PRINT_SETTINGS && renderPrintSettings()}
           {currentView === View.BACKUP && (
             <div className="max-w-4xl mx-auto py-20 bg-[#2B2930] rounded-[60px] border border-[#49454F] text-center space-y-10 shadow-2xl">
               <span className="material-symbols-outlined text-9xl text-[#D0BCFF]">database</span>

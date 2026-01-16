@@ -30,9 +30,15 @@ export interface AppState {
   sales: Sale[];
   config: {
     storeName: string;
+    storeAddress: string;
+    tel: string;
+    vatNumber: string;
+    receiptFooter: string;
     currency: string;
     backupEnabled: boolean;
     lastBackup: number | null;
+    printLogo: boolean;
+    printVat: boolean;
   };
 }
 
@@ -43,5 +49,6 @@ export enum View {
   REPORTS = 'REPORTS',
   BACKUP = 'BACKUP',
   AI_INSIGHTS = 'AI_INSIGHTS',
-  SUPERUSER = 'SUPERUSER'
+  SUPERUSER = 'SUPERUSER',
+  PRINT_SETTINGS = 'PRINT_SETTINGS'
 }

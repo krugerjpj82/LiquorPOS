@@ -12,6 +12,14 @@ export const dbService = {
       const parsed = JSON.parse(data);
       // Ensure currency is ZAR even for existing data
       parsed.config.currency = "ZAR";
+      // Ensure new config fields exist
+      if (!parsed.config.storeAddress) parsed.config.storeAddress = "123 Business Street, Cape Town";
+      if (!parsed.config.tel) parsed.config.tel = "021 555 1234";
+      if (!parsed.config.vatNumber) parsed.config.vatNumber = "4123456789";
+      if (!parsed.config.receiptFooter) parsed.config.receiptFooter = "Thank you for your business!";
+      if (parsed.config.printLogo === undefined) parsed.config.printLogo = true;
+      if (parsed.config.printVat === undefined) parsed.config.printVat = true;
+
       // If store name is the old default, update it
       if (parsed.config.storeName === "OmniPOS Market") {
         parsed.config.storeName = "LiquorPOS";
@@ -23,9 +31,15 @@ export const dbService = {
       sales: [],
       config: {
         storeName: "LiquorPOS",
+        storeAddress: "123 Business Street, Cape Town",
+        tel: "021 555 1234",
+        vatNumber: "4123456789",
+        receiptFooter: "Thank you for your business!",
         currency: "ZAR",
         backupEnabled: true,
-        lastBackup: null
+        lastBackup: null,
+        printLogo: true,
+        printVat: true,
       }
     };
     dbService.saveData(initialState);
