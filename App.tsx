@@ -17,8 +17,26 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 
+const INITIAL_STATE: AppState = {
+  products: [],
+  sales: [],
+  config: {
+    storeName: "LiquorPOS",
+    storeAddress: "123 Business Street, Cape Town",
+    tel: "021 555 1234",
+    vatNumber: "4123456789",
+    receiptFooter: "Thank you for your business!",
+    currency: "ZAR",
+    backupEnabled: true,
+    lastBackup: null,
+    printLogo: true,
+    printVat: true,
+  }
+};
+
 const App: React.FC = () => {
-  const [state, setState] = useState<AppState>(() => dbService.loadData());
+  const [state, setState] = useState<AppState>(INITIAL_STATE);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [currentView, setCurrentView] = useState<View>(View.TERMINAL);
   const [cart, setCart] = useState<SaleItem[]>([]);
   const [barcodeInput, setBarcodeInput] = useState('');
@@ -46,17 +64,34 @@ const App: React.FC = () => {
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Initial Load
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const data = await dbService.loadData();
+        setState(data);
+      } catch (err) {
+        console.error("Failed to initialize database:", err);
+      } finally {
+        setIsInitialLoading(false);
+      }
+    };
+    load();
+  }, []);
+
   // Persistence
   useEffect(() => {
-    dbService.saveData(state);
-  }, [state]);
+    if (!isInitialLoading) {
+      dbService.saveData(state);
+    }
+  }, [state, isInitialLoading]);
 
   // Keyboard Focus for Terminal
   useEffect(() => {
-    if (currentView === View.TERMINAL && barcodeInputRef.current) {
+    if (currentView === View.TERMINAL && barcodeInputRef.current && !showPaymentModal) {
       barcodeInputRef.current.focus();
     }
-  }, [currentView, cart]);
+  }, [currentView, cart, showPaymentModal]);
 
   // Auth Handler
   const handleSuperuserLogin = (e: React.FormEvent) => {
@@ -876,6 +911,13 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#1C1B1F] text-[#E6E1E5] flex transition-all duration-300">
+      {isInitialLoading && (
+        <div className="fixed inset-0 z-[200] bg-[#1C1B1F] flex flex-col items-center justify-center space-y-6">
+          <div className="w-16 h-16 border-4 border-[#D0BCFF] border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-[#D0BCFF] font-bold uppercase tracking-widest animate-pulse">Initializing Database...</p>
+        </div>
+      )}
+
       <Sidebar 
         currentView={currentView} 
         onViewChange={setCurrentView} 
