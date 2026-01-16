@@ -276,6 +276,42 @@ const App: React.FC = () => {
 
   const variance = useMemo(() => (totalCashCounted + manualCardTotal - manualFloat) - dailyCashup.total, [totalCashCounted, manualCardTotal, manualFloat, dailyCashup.total]);
 
+  const printCashupReport = () => {
+    const { config } = state;
+    const today = new Date();
+    
+    console.log("%c [HARDWARE] Printing Cashup Report", "color: #D0BCFF; font-weight: bold;");
+    console.log(`--------------------------------`);
+    console.log(`      *** ${config.storeName} ***`);
+    console.log(`      CASHUP RECONCILIATION`);
+    console.log(`--------------------------------`);
+    console.log(`DATE: ${today.toLocaleDateString()}`);
+    console.log(`TIME: ${today.toLocaleTimeString()}`);
+    console.log(`--------------------------------`);
+    console.log(`EXPECTED SALES:    R${dailyCashup.total.toFixed(2)}`);
+    console.log(`--------------------------------`);
+    console.log(`COUNTED CASH:      R${totalCashCounted.toFixed(2)}`);
+    console.log(`COUNTED CARD:      R${manualCardTotal.toFixed(2)}`);
+    console.log(`LESS FLOAT:        R${manualFloat.toFixed(2)}`);
+    console.log(`--------------------------------`);
+    console.log(`TOTAL DECLARED:    R${(totalCashCounted + manualCardTotal - manualFloat).toFixed(2)}`);
+    console.log(`--------------------------------`);
+    console.log(`VARIANCE:          R${variance.toFixed(2)}`);
+    console.log(`--------------------------------`);
+    console.log(`STATUS: ${variance === 0 ? 'BALANCED' : variance > 0 ? 'OVERS' : 'SHORT'}`);
+    console.log(`--------------------------------`);
+    console.log(`      END OF SHIFT REPORT`);
+    console.log(`--------------------------------`);
+    console.log("%c [HARDWARE] Print Finished", "color: #D0BCFF; font-weight: bold;");
+  };
+
+  const handleFinaliseCashup = () => {
+    printCashupReport();
+    openTillDrawer();
+    alert("Reconciliation Finalised and Cashup Report Printed. Till drawer opened for cash removal.");
+    setIsCashupMode(false);
+  };
+
   const filteredProducts = useMemo(() => {
     if (!searchTerm.trim()) return [];
     return state.products.filter(p => 
@@ -744,7 +780,7 @@ const App: React.FC = () => {
                </div>
                <div className="flex gap-4 border-l border-[#49454F] pl-12">
                 <button onClick={() => setIsCashupMode(false)} className="bg-[#49454F] text-[#E6E1E5] px-8 py-4 rounded-full font-bold hover:bg-[#49454F]/80 transition-all">Cancel</button>
-                <button onClick={() => alert("Reconciliation Finalized. Session Closed.")} className="bg-[#D0BCFF] text-[#381E72] px-8 py-4 rounded-full font-bold shadow-lg hover:bg-[#EADDFF] transition-all">Finalise Cashup</button>
+                <button onClick={handleFinaliseCashup} className="bg-[#D0BCFF] text-[#381E72] px-8 py-4 rounded-full font-bold shadow-lg hover:bg-[#EADDFF] transition-all">Finalise and Print Cashup</button>
                </div>
             </div>
           </header>
