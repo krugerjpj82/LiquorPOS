@@ -1,0 +1,5 @@
+{
+  "name": "LiquorPOS-BOH",
+  "description": "Back of House administration PWA for LiquorPOS-Pro, featuring local-first inventory management and sales reporting.",
+  "requestFramePermissions": []
+}
